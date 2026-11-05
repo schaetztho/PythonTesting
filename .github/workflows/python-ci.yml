@@ -1,0 +1,65 @@
+name: Python CI Pipeline
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  pull_request:
+    branches: [ "main", "master" ]
+
+env:
+  UV_CACHE_DIR: ${{ github.workspace }}/.uv-cache
+  UV_COMPILE_BYTECODE: "1"
+  UV_LINK_MODE: copy
+
+jobs:
+  ci-pipeline:
+    runs-on: self-hosted
+    
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Cache uv dependencies
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.UV_CACHE_DIR }}
+          key: uv-${{ runner.os }}-${{ hashFiles('uv.lock') }}
+          restore-keys: |
+            uv-${{ runner.os }}-
+
+      - name: Install Dependencies
+        run: uv sync --locked
+
+      - name: Ruff Check (Lint)
+        run: uv run ruff check
+
+      - name: Ruff Format Check
+        run: uv run ruff format --check
+        continue-on-error: true # Entspricht allow_failure: true
+
+      - name: Typechecking (Ty)
+        run: |
+          uv run ty check
+          uv run ty check --output-format=github > gl-code-quality-report-ty.json || true
+
+      - name: Upload Typechecking Artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ty-report
+          path: gl-code-quality-report-ty.json
+          if-no-files-found: ignore
+
+      - name: Pytest & Coverage
+        run: |
+          uv run pytest
+          uv run pytest --cov --cov-report=term --cov-report=xml:coverage.xml --junitxml=junit.xml
+
+      - name: Upload Test Artifacts
+        if: always() # Entspricht when: always
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports
+          path: |
+            junit.xml
+            coverage.xml
